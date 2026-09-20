@@ -45,6 +45,42 @@ BarWidget {
   readonly property string helperPath: (Quickshell.env("HOME") || "") + "/.config/omarchy/plugins/wartafak.sysmon/stats.sh"
   readonly property int pollMs: 2000
 
+  // ---- theme palette (dynamic) ----
+  // qs.Commons.Color only exposes foreground/background/accent/urgent/
+  // muted, so read the active theme's full palette for the temp + memory
+  // colors. Falls back to the previous hardcodes when a theme omits them.
+  property color themeTemp: "#e0af68"
+  property color themeGreen: "#9ece6a"
+  property color themePurple: "#ad8ee6"
+
+  function loadThemePalette(raw) {
+    var yellow = "", orange = "", green = "", magenta = "", purple = ""
+    var lines = String(raw || "").split("\n")
+    for (var i = 0; i < lines.length; i++) {
+      var m = lines[i].match(/^\s*(yellow|orange|green|magenta|purple)\s*=\s*["']?(#[0-9A-Fa-f]{6})/)
+      if (!m) continue
+      if (m[1] === "yellow") yellow = m[2]
+      else if (m[1] === "orange") orange = m[2]
+      else if (m[1] === "green") green = m[2]
+      else if (m[1] === "magenta") magenta = m[2]
+      else if (m[1] === "purple") purple = m[2]
+    }
+    // Yellow first: it preserves the established temp look on themes like
+    // tokyo-night whose yellow is this orange-yellow.
+    root.themeTemp = yellow || orange || "#e0af68"
+    root.themeGreen = green || "#9ece6a"
+    root.themePurple = magenta || purple || "#ad8ee6"
+  }
+
+  property FileView themeColorsFile: FileView {
+    path: (Quickshell.env("HOME") || "") + "/.local/state/omarchy/current/theme/colors.toml"
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.loadThemePalette(text())
+    onFileChanged: reload()
+    onLoadFailed: root.loadThemePalette("")
+  }
+
   function refresh() {
     if (!statsProc.running) {
       statsProc.command = ["bash", helperPath]

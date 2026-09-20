@@ -98,6 +98,44 @@ Panel {
             fontFamily: root.contentFontFamily
           }
 
+          // ---------- Top summary: current usage rings + temp ----------
+          Item {
+            width: parent.width
+            implicitHeight: summaryRow.implicitHeight
+            height: summaryRow.height
+
+            Row {
+              id: summaryRow
+              anchors.horizontalCenter: parent.horizontalCenter
+              spacing: Style.space(20)
+
+              SummaryCard {
+                title: "CPU"
+                usage: hostWidget ? hostWidget.cpu : null
+                subText: hostWidget ? Model.fmtTemp(hostWidget.cpuTemp) : "--"
+                subColor: hostWidget ? hostWidget.themeTemp : "#e0af68"
+                ringColor: Color.accent
+              }
+
+              SummaryCard {
+                visible: hostWidget ? hostWidget.hasGpu : false
+                title: "GPU"
+                usage: hostWidget ? hostWidget.gpu : null
+                subText: hostWidget ? Model.fmtTemp(hostWidget.gpuTemp) : "--"
+                subColor: hostWidget ? hostWidget.themeTemp : "#e0af68"
+                ringColor: Color.accent
+              }
+
+              SummaryCard {
+                title: "MEMORY"
+                usage: hostWidget ? hostWidget.mem : null
+                // show GB detail under the ring when available; NOW info only
+                detailText: hostWidget ? Model.fmtMemDetail(hostWidget.memUsedKb, hostWidget.memTotalKb) : ""
+                ringColor: hostWidget ? hostWidget.themeGreen : "#9ece6a"
+              }
+            }
+          }
+
           // ---------- CPU ----------
           PanelSeparator { foreground: root.contentForeground }
 
@@ -105,7 +143,7 @@ Panel {
             text: root.cpuHeader()
             width: parent.width
             elide: Text.ElideRight
-            foreground: root.contentForeground
+            foreground: hostWidget ? hostWidget.themePurple : "#ad8ee6"
             fontFamily: root.contentFontFamily
           }
 
@@ -117,6 +155,7 @@ Panel {
           HistoryGraph {
             history: hostWidget ? hostWidget.cpuHist : []
             lineColor: Color.accent
+            unit: "%"
             minVal: 0
             maxVal: 100
           }
@@ -128,9 +167,10 @@ Panel {
           }
           HistoryGraph {
             history: hostWidget ? hostWidget.cpuTempHist : []
-            lineColor: "#e0af68"
+            lineColor: hostWidget ? hostWidget.themeTemp : "#e0af68"
+            unit: "°"
             minVal: 0
-            maxVal: 100
+            maxVal: 120
           }
 
           // ---------- GPU ----------
@@ -144,7 +184,7 @@ Panel {
             text: root.gpuHeader()
             width: parent.width
             elide: Text.ElideRight
-            foreground: root.contentForeground
+            foreground: hostWidget ? hostWidget.themePurple : "#ad8ee6"
             fontFamily: root.contentFontFamily
           }
 
@@ -158,6 +198,7 @@ Panel {
             visible: hostWidget ? hostWidget.hasGpu : false
             history: hostWidget ? hostWidget.gpuHist : []
             lineColor: Color.accent
+            unit: "%"
             minVal: 0
             maxVal: 100
           }
@@ -171,9 +212,10 @@ Panel {
           HistoryGraph {
             visible: hostWidget ? hostWidget.hasGpu : false
             history: hostWidget ? hostWidget.gpuTempHist : []
-            lineColor: "#e0af68"
+            lineColor: hostWidget ? hostWidget.themeTemp : "#e0af68"
+            unit: "°"
             minVal: 0
-            maxVal: 100
+            maxVal: 120
           }
 
           // ---------- Memory ----------
@@ -183,7 +225,7 @@ Panel {
             text: root.memHeader()
             width: parent.width
             elide: Text.ElideRight
-            foreground: root.contentForeground
+            foreground: hostWidget ? hostWidget.themePurple : "#ad8ee6"
             fontFamily: root.contentFontFamily
           }
 
@@ -195,7 +237,8 @@ Panel {
           }
           HistoryGraph {
             history: hostWidget ? hostWidget.memHist : []
-            lineColor: "#9ece6a"
+            lineColor: hostWidget ? hostWidget.themeGreen : "#9ece6a"
+            unit: "%"
             minVal: 0
             maxVal: 100
           }
@@ -204,6 +247,114 @@ Panel {
             width: parent.width
             height: Style.space(4)
           }
+        }
+      }
+    }
+  }
+
+  // Top summary card: title above a usage ring, NOW values inside.
+  // Ring fill = usage %; temp (CPU/GPU) or GB detail (memory) sits inside
+  // as text since temp can't fill the same ring.
+  component SummaryCard: Column {
+    id: card
+    required property string title
+    required property var usage
+    property string subText: ""
+    property string detailText: ""
+    property color subColor: Qt.darker(root.contentForeground, 1.4)
+    required property color ringColor
+
+    spacing: Style.space(6)
+
+    Text {
+      textFormat: Text.PlainText
+      text: card.title
+      color: Qt.darker(root.contentForeground, 1.4)
+      font.family: root.contentFontFamily
+      font.pixelSize: Style.font.body
+      font.bold: true
+      anchors.horizontalCenter: parent.horizontalCenter
+    }
+
+    Item {
+      id: ringWrap
+      width: Style.space(104)
+      height: Style.space(104)
+      anchors.horizontalCenter: parent.horizontalCenter
+
+      Canvas {
+        id: ringCanvas
+        anchors.fill: parent
+        renderStrategy: Canvas.Cooperative
+
+        onPaint: {
+          var ctx = getContext("2d")
+          var w = width, h = height
+          ctx.clearRect(0, 0, w, h)
+          var cx = w / 2, cy = h / 2
+          var radius = Math.min(w, h) / 2 - 6
+          var lw = 7
+          ctx.lineWidth = lw
+          // track
+          ctx.strokeStyle = Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.16)
+          ctx.beginPath()
+          ctx.arc(cx, cy, radius, 0, Math.PI * 2)
+          ctx.stroke()
+          // value arc
+          var v = card.usage
+          var frac = (typeof v === "number" && isFinite(v)) ? Math.max(0, Math.min(100, v)) / 100 : 0
+          if (frac > 0) {
+            ctx.strokeStyle = card.ringColor
+            ctx.lineCap = "round"
+            ctx.beginPath()
+            ctx.arc(cx, cy, radius, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2)
+            ctx.stroke()
+          }
+        }
+
+        onWidthChanged: requestPaint()
+        onHeightChanged: requestPaint()
+        Connections {
+          target: card
+          function onUsageChanged() { ringCanvas.requestPaint() }
+          function onRingColorChanged() { ringCanvas.requestPaint() }
+        }
+        Connections {
+          target: root
+          function onContentForegroundChanged() { ringCanvas.requestPaint() }
+        }
+      }
+
+      Column {
+        anchors.centerIn: parent
+        spacing: 0
+        width: parent.width - Style.space(24)
+
+        Text {
+          textFormat: Text.PlainText
+          text: Model.fmtPct(card.usage)
+          color: card.ringColor
+          font.family: root.contentFontFamily
+          font.pixelSize: Style.font.title
+          font.bold: true
+          horizontalAlignment: Text.AlignHCenter
+          anchors.horizontalCenter: parent.horizontalCenter
+          elide: Text.ElideRight
+          width: parent.width
+        }
+
+        Text {
+          // CPU/GPU: temp; Memory: GB detail (empty when unknown)
+          textFormat: Text.PlainText
+          text: card.detailText !== "" ? card.detailText : card.subText
+          color: card.detailText !== "" ? Qt.darker(root.contentForeground, 1.4) : card.subColor
+          font.family: root.contentFontFamily
+          font.pixelSize: card.detailText !== "" ? Style.font.caption : Style.font.body
+          font.bold: card.detailText === ""
+          horizontalAlignment: Text.AlignHCenter
+          anchors.horizontalCenter: parent.horizontalCenter
+          elide: Text.ElideRight
+          width: parent.width
         }
       }
     }
@@ -260,21 +411,62 @@ Panel {
   }
 
   // Line graph of the last N samples. Nulls render as gaps so missing
-  // polls don't drag the line to zero.
+  // polls don't drag the line to zero. Y ticks run from maxVal down to
+  // minVal in tickStep increments, one gridline + label per tick.
   component HistoryGraph: Item {
     id: graph
     property var history: []
     property color lineColor: Color.accent
     property real minVal: 0
     property real maxVal: 100
+    property real tickStep: 25
+    // Unit suffix for the Y axis labels, e.g. "%" for usage, "°" for temp.
+    property string unit: ""
+
+    // Ticks land on multiples of tickStep within [minVal, maxVal], going
+    // down from the highest fitting multiple (so a 0–120 scale with step
+    // 25 ticks 100/75/50/25/0, leaving 120 as unlabeled headroom).
+    readonly property real topTick: Math.floor(graph.maxVal / graph.tickStep) * graph.tickStep
+    readonly property int tickCount: Math.max(2, Math.floor((graph.topTick - graph.minVal) / graph.tickStep) + 1)
 
     width: parent ? parent.width : 0
-    implicitHeight: Style.space(84)
-    height: Style.space(84)
+    implicitHeight: Style.space(120)
+    height: Style.space(120)
+
+    function tickLabel(v) {
+      var n = Number(v)
+      if (!isFinite(n)) return "--"
+      return (n % 1 === 0 ? String(n) : n.toFixed(1)) + graph.unit
+    }
+
+    function tickY(tickValue, labelHeight) {
+      var y = Model.yFor(tickValue, graph.minVal, graph.maxVal, graph.height - 4) + 2 - labelHeight / 2
+      return Math.max(0, Math.min(graph.height - labelHeight, y))
+    }
+
+    // Y axis ticks in the left gutter, each centered on its gridline.
+    Repeater {
+      model: graph.tickCount
+      Text {
+        required property int index
+        readonly property real tickValue: graph.topTick - index * graph.tickStep
+        textFormat: Text.PlainText
+        text: graph.tickLabel(tickValue)
+        color: Qt.darker(root.contentForeground, 1.4)
+        font.family: root.contentFontFamily
+        font.pixelSize: Style.font.caption
+        horizontalAlignment: Text.AlignRight
+        elide: Text.ElideRight
+        width: Style.space(26)
+        x: 0
+        y: graph.tickY(tickValue, implicitHeight)
+      }
+    }
 
     Canvas {
       id: canvas
       anchors.fill: parent
+      anchors.leftMargin: Style.space(30)
       renderStrategy: Canvas.Cooperative
 
       onPaint: {
@@ -285,11 +477,12 @@ Panel {
         var n = hist.length
         if (n === 0) return
 
-        // grid: 3 faint horizontal lines
-        ctx.strokeStyle = Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.14)
+        // grid: one faint line per Y tick, aligned with the labels
+        ctx.strokeStyle = Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.10)
         ctx.lineWidth = 1
-        for (var g = 0; g <= 2; g++) {
-          var gy = Math.round((h - 1) * g / 2) + 0.5
+        for (var ti = 0; ti < graph.tickCount; ti++) {
+          var tick = graph.topTick - ti * graph.tickStep
+          var gy = Math.round(Model.yFor(tick, graph.minVal, graph.maxVal, h - 4)) + 2 + 0.5
           ctx.beginPath()
           ctx.moveTo(0, gy)
           ctx.lineTo(w, gy)
