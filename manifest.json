@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "wartafak.sysmon",
+  "name": "SysMon",
+  "version": "1.0.0",
+  "author": "wartafak",
+  "license": "MIT",
+  "description": "CPU/GPU/memory usage and temperature with 10-minute averages and history graphs",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "SysMon",
+    "description": "CPU, GPU and memory usage + temperature with history graphs",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
