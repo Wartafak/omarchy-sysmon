@@ -4,6 +4,17 @@ Omarchy shell plugin (`wartafak.sysmon`): CPU / GPU / memory usage and
 temperature in the top bar, with a popup showing current values, 10-minute
 averages, and line-graph history.
 
+## Screenshots
+
+Bar widget (right side of the top bar):
+
+![Bar widget](screenshots/bar.png)
+
+Popup panel — summary rings, current values, 10-minute averages, and
+history graphs (scroll for GPU / memory sections):
+
+![System Monitor popup](screenshots/panel.png)
+
 ## Install
 
 ```bash
