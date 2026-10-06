@@ -18,12 +18,24 @@ history graphs (scroll for GPU / memory sections):
 ## Install
 
 ```bash
-git clone <this-repo> ~/.config/omarchy/plugins/wartafak.sysmon
+omarchy plugin add https://github.com/Wartafak/omarchy-sysmon.git --enable
+```
+
+Or manually:
+
+```bash
+git clone https://github.com/Wartafak/omarchy-sysmon.git ~/.config/omarchy/plugins/wartafak.sysmon
 omarchy plugin enable wartafak.sysmon --section right
 ```
 
 If QML edits don't appear, run `omarchy restart shell` (hot-reload does not
 re-execute an already-loaded plugin).
+
+## Remove
+
+```bash
+omarchy plugin remove wartafak.sysmon
+```
 
 ## How it works
 
