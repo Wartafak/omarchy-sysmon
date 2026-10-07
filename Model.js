@@ -118,6 +118,82 @@ function memTitle(s) {
   return "MEMORY";
 }
 
+// One row of processes.sh output. Null when the row is unusable (bad pid,
+// empty name) so a corrupt line can't poison the table.
+function parseProcess(o) {
+  if (!o || typeof o !== "object") return null;
+  var pid = parseInt(o.pid, 10);
+  if (!isFinite(pid) || pid <= 0) return null;
+  var comm = typeof o.comm === "string" ? o.comm : "";
+  if (comm === "") return null;
+  return { pid: pid, comm: comm.slice(0, 40), cpu: numOrNull(o.cpu), mem: numOrNull(o.mem), rssKb: numOrNull(o.rss_kb) };
+}
+
+function parseProcesses(raw) {
+  var arr;
+  try {
+    arr = JSON.parse(String(raw || ""));
+  } catch (e) {
+    return [];
+  }
+  if (!Array.isArray(arr)) return [];
+  var out = [];
+  for (var i = 0; i < arr.length; i++) {
+    var p = parseProcess(arr[i]);
+    if (p) out.push(p);
+  }
+  return out;
+}
+
+// Table ordering. key is "cpu", "mem", "comm" or "pid"; dir is 1 (asc) or
+// -1 (desc), anything else means desc. "mem" compares the absolute RSS
+// (same order as mem% — one shared MemTotal — but exact, not rounded).
+// Nulls always sort last, ties break by pid so the order is
+// deterministic. Never mutates the input.
+function sortProcesses(list, key, dir) {
+  var arr = Array.isArray(list) ? list.slice() : [];
+  var k = key === "mem" ? "mem" : key === "comm" ? "comm" : key === "pid" ? "pid" : "cpu";
+  var d = dir === 1 ? 1 : -1;
+  function val(p) {
+    if (k === "mem" && p.rssKb !== null && p.rssKb !== undefined) return p.rssKb;
+    return p[k];
+  }
+  arr.sort(function (a, b) {
+    var av = val(a), bv = val(b);
+    var an = av === null || av === undefined;
+    var bn = bv === null || bv === undefined;
+    if (an && bn) return a.pid - b.pid;
+    if (an) return 1;
+    if (bn) return -1;
+    var cmp;
+    if (k === "comm") {
+      var as = String(av), bs = String(bv);
+      cmp = as < bs ? -1 : as > bs ? 1 : 0;
+    } else {
+      cmp = av < bv ? -1 : av > bv ? 1 : 0;
+    }
+    if (cmp !== 0) return cmp * d;
+    return a.pid - b.pid;
+  });
+  return arr;
+}
+
+// "1.3GB (3.6%)" — absolute RSS plus percent for the process table.
+// GB with one decimal at >= 1 GiB, whole MB below. "--" when unknown;
+// partial info still renders ("1.3GB" / "(3.6%)").
+function fmtProcMem(p) {
+  var v = p || {};
+  var rss = numOrNull(v.rssKb), pct = numOrNull(v.mem);
+  if (rss === null && pct === null) return "--";
+  var abs = "";
+  if (rss !== null) {
+    abs = rss >= 1048576 ? (rss / 1048576).toFixed(1) + "GB" : Math.round(rss / 1024) + "MB";
+  }
+  if (pct === null) return abs;
+  var ps = pct.toFixed(1) + "%";
+  return abs !== "" ? abs + " (" + ps + ")" : "(" + ps + ")";
+}
+
 // Map a value in [min,max] to a Y pixel in [0,height] (0 = top).
 function yFor(value, min, max, height) {
   var lo = Number(min), hi = Number(max), h = Number(height);
@@ -149,6 +225,10 @@ if (typeof module !== "undefined") {
     cpuTitle: cpuTitle,
     gpuTitle: gpuTitle,
     memTitle: memTitle,
+    parseProcess: parseProcess,
+    parseProcesses: parseProcesses,
+    sortProcesses: sortProcesses,
+    fmtProcMem: fmtProcMem,
     yFor: yFor,
     xFor: xFor
   };

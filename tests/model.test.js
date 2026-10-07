@@ -232,3 +232,108 @@ describe("xFor", () => {
     assert.equal(M.xFor(0, 1, 300), 300)
   })
 })
+
+describe("parseProcesses", () => {
+  it("parses processes.sh output", () => {
+    const list = M.parseProcesses('[{"pid":1,"comm":"systemd","cpu":0.3,"mem":0.1,"rss_kb":1234},{"pid":42,"comm":"foot","cpu":12.5,"mem":1.2,"rss_kb":567890}]')
+    assert.deepEqual(list, [
+      { pid: 1, comm: "systemd", cpu: 0.3, mem: 0.1, rssKb: 1234 },
+      { pid: 42, comm: "foot", cpu: 12.5, mem: 1.2, rssKb: 567890 }
+    ])
+  })
+  it("drops corrupt rows but keeps the rest", () => {
+    const list = M.parseProcesses('[{"pid":1,"comm":"ok","cpu":1,"mem":1,"rss_kb":10},{"pid":0,"comm":"x","cpu":1,"mem":1},{"pid":2,"comm":"","cpu":1,"mem":1},"nope",null]')
+    assert.deepEqual(list, [{ pid: 1, comm: "ok", cpu: 1, mem: 1, rssKb: 10 }])
+  })
+  it("keeps null readings as null", () => {
+    assert.deepEqual(
+      M.parseProcesses('[{"pid":7,"comm":"kworker","cpu":null,"mem":null}]'),
+      [{ pid: 7, comm: "kworker", cpu: null, mem: null, rssKb: null }]
+    )
+  })
+  it("returns [] for invalid input", () => {
+    for (const raw of ["not json", "", null, undefined, '{"pid":1}', "42"]) {
+      assert.deepEqual(M.parseProcesses(raw), [])
+    }
+  })
+  it("truncates overlong names", () => {
+    const list = M.parseProcesses(JSON.stringify([{ pid: 1, comm: "x".repeat(100), cpu: 0, mem: 0 }]))
+    assert.equal(list[0].comm.length, 40)
+  })
+})
+
+describe("sortProcesses", () => {
+  const rows = [
+    { pid: 3, comm: "zed", cpu: 0.0, mem: 2.3 },
+    { pid: 1, comm: "systemd", cpu: 0.3, mem: 0.1 },
+    { pid: 2, comm: "foot", cpu: 12.5, mem: 1.2 }
+  ]
+  it("sorts by cpu descending by default", () => {
+    assert.deepEqual(M.sortProcesses(rows).map((p) => p.pid), [2, 1, 3])
+    assert.deepEqual(M.sortProcesses(rows, "cpu", -1).map((p) => p.pid), [2, 1, 3])
+  })
+  it("sorts ascending on dir 1", () => {
+    assert.deepEqual(M.sortProcesses(rows, "cpu", 1).map((p) => p.pid), [3, 1, 2])
+  })
+  it("sorts by mem and by name", () => {
+    assert.deepEqual(M.sortProcesses(rows, "mem", -1).map((p) => p.pid), [3, 2, 1])
+    assert.deepEqual(M.sortProcesses(rows, "comm", 1).map((p) => p.pid), [2, 1, 3])
+  })
+  it("sorts by pid", () => {
+    assert.deepEqual(M.sortProcesses(rows, "pid", 1).map((p) => p.pid), [1, 2, 3])
+    assert.deepEqual(M.sortProcesses(rows, "pid", -1).map((p) => p.pid), [3, 2, 1])
+  })
+  it("falls back to cpu on unknown keys", () => {
+    assert.deepEqual(M.sortProcesses(rows, "gpu", -1).map((p) => p.pid), [2, 1, 3])
+  })
+  it("sorts by mem on absolute RSS, not the rounded percent", () => {
+    const mixed = [
+      { pid: 1, comm: "a", cpu: 0, mem: 5.0, rssKb: 100000 },
+      { pid: 2, comm: "b", cpu: 0, mem: 1.0, rssKb: 900000 }
+    ]
+    assert.deepEqual(M.sortProcesses(mixed, "mem", -1).map((p) => p.pid), [2, 1])
+  })
+  it("falls back to mem percent without rssKb", () => {
+    const legacy = [
+      { pid: 1, comm: "a", cpu: 0, mem: 1.0 },
+      { pid: 2, comm: "b", cpu: 0, mem: 5.0 }
+    ]
+    assert.deepEqual(M.sortProcesses(legacy, "mem", -1).map((p) => p.pid), [2, 1])
+  })
+  it("parks nulls last either way and breaks ties by pid", () => {
+    const withNull = rows.concat([{ pid: 9, comm: "kworker", cpu: null, mem: null }])
+    assert.deepEqual(M.sortProcesses(withNull, "cpu", -1).map((p) => p.pid), [2, 1, 3, 9])
+    assert.deepEqual(M.sortProcesses(withNull, "cpu", 1).map((p) => p.pid), [3, 1, 2, 9])
+    const tied = [
+      { pid: 5, comm: "a", cpu: 1.0, mem: 0 },
+      { pid: 4, comm: "b", cpu: 1.0, mem: 0 }
+    ]
+    assert.deepEqual(M.sortProcesses(tied, "cpu", -1).map((p) => p.pid), [4, 5])
+  })
+  it("does not mutate the input", () => {
+    const src = rows.map((p) => ({ ...p }))
+    M.sortProcesses(src, "cpu", -1)
+    assert.deepEqual(src.map((p) => p.pid), [3, 1, 2])
+  })
+  it("handles non-arrays", () => {
+    assert.deepEqual(M.sortProcesses(null, "cpu", -1), [])
+  })
+})
+
+describe("fmtProcMem", () => {
+  it("formats GB with percent", () => {
+    assert.equal(M.fmtProcMem({ rssKb: 1363148, mem: 3.6 }), "1.3GB (3.6%)")
+  })
+  it("formats whole MB below 1 GiB", () => {
+    assert.equal(M.fmtProcMem({ rssKb: 239616, mem: 1.4 }), "234MB (1.4%)")
+  })
+  it("renders partial info", () => {
+    assert.equal(M.fmtProcMem({ rssKb: 1363148, mem: null }), "1.3GB")
+    assert.equal(M.fmtProcMem({ rssKb: null, mem: 3.6 }), "(3.6%)")
+  })
+  it("dashes fully unknown values", () => {
+    assert.equal(M.fmtProcMem({ rssKb: null, mem: null }), "--")
+    assert.equal(M.fmtProcMem({}), "--")
+    assert.equal(M.fmtProcMem(null), "--")
+  })
+})

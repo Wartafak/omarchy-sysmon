@@ -45,6 +45,13 @@ BarWidget {
   readonly property string helperPath: (Quickshell.env("HOME") || "") + "/.config/omarchy/plugins/wartafak.sysmon/stats.sh"
   readonly property int pollMs: 2000
 
+  // ---- process list (sampled only while the panel is open) ----
+  property var processes: []
+  readonly property int processCount: processes.length
+  readonly property string procHelperPath: (Quickshell.env("HOME") || "") + "/.config/omarchy/plugins/wartafak.sysmon/processes.sh"
+  readonly property string killHelperPath: (Quickshell.env("HOME") || "") + "/.config/omarchy/plugins/wartafak.sysmon/killproc.sh"
+  readonly property int procPollMs: 2000
+
   // ---- theme palette (dynamic) ----
   // qs.Commons.Color only exposes foreground/background/accent/urgent/
   // muted, so read the active theme's full palette for the temp + memory
@@ -86,6 +93,38 @@ BarWidget {
       statsProc.command = ["bash", helperPath]
       statsProc.running = true
     }
+  }
+
+  function refreshProcesses() {
+    if (!procProc.running) {
+      procProc.command = ["bash", procHelperPath]
+      procProc.running = true
+    }
+  }
+
+  function applyProcesses(raw) {
+    var list = Model.parseProcesses(raw)
+    root.processes = list
+  }
+
+  // Signal a process by pid. force=false sends TERM, true sends KILL.
+  // killproc.sh validates its args; pid 1 is never signalled.
+  function killProcess(pid, force) {
+    var id = parseInt(pid, 10)
+    if (!isFinite(id) || id <= 1) return
+    if (killProc.running) return
+    killProc.command = ["bash", killHelperPath, force ? "KILL" : "TERM", String(id)]
+    killProc.running = true
+  }
+
+  // Copy a pid to the clipboard (wl-copy takes the text as argv, so no
+  // shell is involved). Fire-and-forget: wl-copy forks to serve pastes.
+  function copyPid(pid) {
+    var id = parseInt(pid, 10)
+    if (!isFinite(id) || id <= 0) return
+    if (copyProc.running) return
+    copyProc.command = ["wl-copy", String(id)]
+    copyProc.running = true
   }
 
   function applyStats(raw) {
@@ -136,8 +175,10 @@ BarWidget {
   // ---- popup panel routing (clock pattern) ----
   readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
 
-  // Read-only diagnostics for tests/scripting. Reached via
-  // `omarchy-shell shell call wartafak.sysmon debugState '{}'`.
+  // Read-only diagnostics for tests/scripting. Reached via quickshell's
+  // native IPC (NOT `omarchy-shell shell call`, which only routes to
+  // panel/overlay plugins):
+  // `quickshell --path /usr/share/omarchy/shell ipc call wartafak.sysmon debugState`.
   function debugState() {
     return JSON.stringify({
       opened: root.opened,
@@ -156,7 +197,8 @@ BarWidget {
       hasGpu: root.hasGpu,
       sampleCount: root.sampleCount,
       cpuHistLen: root.cpuHist ? root.cpuHist.length : 0,
-      memHistLen: root.memHist ? root.memHist.length : 0
+      memHistLen: root.memHist ? root.memHist.length : 0,
+      processCount: root.processCount
     })
   }
 
@@ -182,6 +224,9 @@ BarWidget {
   onBarChanged: injectPanel()
   onSettingsChanged: injectPanel()
 
+  // Sample processes as soon as the panel opens so the table is fresh.
+  onOpenedChanged: { if (root.opened) root.refreshProcesses() }
+
   Component.onCompleted: refresh()
 
   Timer {
@@ -192,12 +237,39 @@ BarWidget {
     onTriggered: root.refresh()
   }
 
+  Timer {
+    interval: root.procPollMs
+    running: true
+    repeat: true
+    triggeredOnStart: true
+    onTriggered: { if (root.opened) root.refreshProcesses() }
+  }
+
   Process {
     id: statsProc
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.applyStats(text)
     }
+  }
+
+  Process {
+    id: procProc
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.applyProcesses(text)
+    }
+  }
+
+  // Kill runs to completion fast; refresh the table right after so the
+  // row disappears without waiting for the next poll.
+  Process {
+    id: killProc
+    onExited: { if (root.opened) root.refreshProcesses() }
+  }
+
+  Process {
+    id: copyProc
   }
 
   Loader {

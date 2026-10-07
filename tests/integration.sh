@@ -1,6 +1,7 @@
 #!/bin/bash
 # Integration test for wartafak.sysmon.
-# Part A (static) always runs: stats.sh schema + value ranges, Model.js loads.
+# Part A (static) always runs: stats.sh + processes.sh schemas and ranges,
+# killproc.sh validation (incl. TERM/KILL on processes we own), Model.js loads.
 # Part B (live) needs omarchy-shell running with the plugin enabled; it is
 # skipped gracefully otherwise and leaves the panel closed (net-zero).
 # Run with:  ./tests/integration.sh
@@ -8,6 +9,11 @@
 set -u
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ID="wartafak.sysmon"
+# Bar-widget IpcHandler functions are NOT reachable via
+# `omarchy-shell shell call` (that only routes to panel/overlay plugins,
+# see shell.qml callIfLoaded) — use quickshell's native IPC instead.
+SHELL_PATH="${OMARCHY_SHELL_PATH:-/usr/share/omarchy/shell}"
+qshell() { quickshell --path "$SHELL_PATH" ipc call "$ID" "$1"; }
 PASS=0
 FAIL=0
 
@@ -65,25 +71,70 @@ KEYS2="$(echo "$RAW2" | python3 -c 'import json,sys; print(" ".join(sorted(json.
 echo "$RAW" | node -e 'let t="";process.stdin.on("data",c=>t+=c).on("end",()=>{const M=require("'"$DIR"'/Model.js");const s=M.parseStats(t);if(typeof s.cpu==="undefined"||typeof s.mem==="undefined"){console.error("missing fields");process.exit(1)}})' 2>/dev/null \
   && ok "Model.js parses live stats.sh output" || fail "Model.js parses live stats.sh output"
 
+# --- Part A2: processes.sh (no shell needed) ---
+
+PRAW="$("$DIR/processes.sh" 2>/dev/null)"
+[ $? -eq 0 ] && [ -n "$PRAW" ] && ok "processes.sh exits 0 with output" || fail "processes.sh exits 0 with output"
+
+echo "$PRAW" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert isinstance(d, list) and len(d) > 0' 2>/dev/null \
+  && ok "processes.sh prints a non-empty JSON array" || fail "processes.sh prints a non-empty JSON array"
+
+pcheck() { CHECK_EXPR="$1" python3 -c 'import json,sys,os; d=json.load(sys.stdin); assert eval(os.environ["CHECK_EXPR"])' <<< "$PRAW" 2>/dev/null; }
+
+pcheck 'all(set(p) == {"pid","comm","cpu","mem","rss_kb"} for p in d)' \
+  && ok "process rows have pid/comm/cpu/mem/rss_kb" || fail "process rows have pid/comm/cpu/mem/rss_kb"
+pcheck 'all(p["pid"] > 0 and p["comm"] != "" for p in d)' \
+  && ok "pids positive, names non-empty" || fail "pids positive, names non-empty"
+pcheck 'all((p["cpu"] is None or 0 <= p["cpu"] <= 1600) and (p["mem"] is None or 0 <= p["mem"] <= 100) for p in d)' \
+  && ok "cpu/mem in range" || fail "cpu/mem in range"
+pcheck 'all(p["rss_kb"] is None or p["rss_kb"] >= 0 for p in d)' \
+  && ok "rss_kb non-negative" || fail "rss_kb non-negative"
+pcheck 'all(d[i]["cpu"] is None or d[i+1]["cpu"] is None or d[i]["cpu"] >= d[i+1]["cpu"] for i in range(len(d)-1))' \
+  && ok "sorted by cpu desc" || fail "sorted by cpu desc"
+
+# Model.js parses the live process payload.
+echo "$PRAW" | node -e 'let t="";process.stdin.on("data",c=>t+=c).on("end",()=>{const M=require("'"$DIR"'/Model.js");const l=M.parseProcesses(t);if(!Array.isArray(l)||l.length===0){console.error("empty");process.exit(1)}})' 2>/dev/null \
+  && ok "Model.js parses live processes.sh output" || fail "Model.js parses live processes.sh output"
+
+# --- Part A3: killproc.sh validation (no shell needed) ---
+
+"$DIR/killproc.sh" TERM abc >/dev/null 2>&1; [ $? -eq 2 ] \
+  && ok "killproc rejects non-numeric pid" || fail "killproc rejects non-numeric pid"
+"$DIR/killproc.sh" TERM 1 >/dev/null 2>&1; [ $? -eq 2 ] \
+  && ok "killproc refuses pid 1" || fail "killproc refuses pid 1"
+"$DIR/killproc.sh" HUP 123 >/dev/null 2>&1; [ $? -eq 2 ] \
+  && ok "killproc rejects unknown signal" || fail "killproc rejects unknown signal"
+"$DIR/killproc.sh" TERM '1;touch /tmp/pwned' >/dev/null 2>&1; [ $? -eq 2 ] && [ ! -e /tmp/pwned ] \
+  && ok "killproc rejects injection" || fail "killproc rejects injection"
+
+# End-to-end on processes we own: TERM then KILL, both net-zero.
+sleep 120 & VICTIM=$!
+"$DIR/killproc.sh" TERM "$VICTIM" >/dev/null 2>&1
+sleep 0.5
+if kill -0 "$VICTIM" 2>/dev/null; then fail "killproc TERM kills own process"; kill -KILL "$VICTIM" 2>/dev/null; else ok "killproc TERM kills own process"; fi
+sleep 120 & VICTIM=$!
+"$DIR/killproc.sh" KILL "$VICTIM" >/dev/null 2>&1
+sleep 0.5
+if kill -0 "$VICTIM" 2>/dev/null; then fail "killproc KILL kills own process"; kill -KILL "$VICTIM" 2>/dev/null; else ok "killproc KILL kills own process"; fi
+
 # --- Part B: live shell (skipped when the shell is not running or stale) ---
 
-# The running shell only picks up new QML after a restart, so an "unknown"
-# accessor (or no shell at all) means SKIP, not FAIL.
-if ! omarchy-shell shell call "$ID" debugState '{}' 2>/dev/null | python3 -c 'import json,sys; json.loads(sys.stdin.read())' 2>/dev/null; then
-  echo "SKIP: live shell checks need omarchy-shell with $ID enabled (and restarted after QML edits)"
+# Non-JSON output (shell down, plugin disabled) means SKIP, not FAIL.
+if ! qshell debugState 2>/dev/null | python3 -c 'import json,sys; json.loads(sys.stdin.read())' 2>/dev/null; then
+  echo "SKIP: live shell checks need omarchy-shell running with $ID enabled"
   echo "--- $PASS passed, $FAIL failed ---"
   [ "$FAIL" -eq 0 ]
   exit $?
 fi
 
-state() { omarchy-shell shell call "$ID" debugState '{}'; }
+state() { qshell debugState; }
 field() { python3 -c 'import json,sys; v=json.load(sys.stdin)["'"$1"'"]; print("True" if v is True else "False" if v is False else v if v is not None else "null")'; }
 
 S="$(state)"
 echo "$S" | python3 -c 'import json,sys; json.loads(sys.stdin.read())' 2>/dev/null \
   && ok "debugState returns JSON" || fail "debugState returns JSON"
 
-echo "$S" | python3 -c 'import json,sys; d=json.loads(sys.stdin.read()); assert all(k in d for k in ("opened","cpu","gpu","mem","sampleCount","cpuHistLen","hasGpu"))' 2>/dev/null \
+echo "$S" | python3 -c 'import json,sys; d=json.loads(sys.stdin.read()); assert all(k in d for k in ("opened","cpu","gpu","mem","sampleCount","cpuHistLen","hasGpu","processCount"))' 2>/dev/null \
   && ok "debugState has expected fields" || fail "debugState has expected fields"
 
 # hasGpu agrees with the vendor string.
@@ -99,7 +150,7 @@ echo "$S" | python3 -c 'import json,sys; d=json.loads(sys.stdin.read()); assert 
   && ok "histories bounded (<=300)" || fail "histories bounded (<=300)"
 
 # refresh is callable and a second poll keeps the schema.
-omarchy-shell shell call "$ID" refresh '{}' >/dev/null 2>&1 \
+qshell refresh >/dev/null 2>&1 \
   && ok "refresh callable" || fail "refresh callable"
 sleep 3
 S2="$(state)"
@@ -108,18 +159,22 @@ K2="$(echo "$S2" | python3 -c 'import json,sys; print(" ".join(sorted(json.loads
 [ "$K1" = "$K2" ] && ok "debugState schema stable" || fail "debugState schema stable"
 
 # Panel open/close round-trip, left closed (net-zero).
-omarchy-shell shell call "$ID" open '{}' >/dev/null 2>&1
+qshell open >/dev/null 2>&1
 sleep 1
 [ "$(state | field opened)" = "True" ] && ok "open shows panel" || fail "open shows panel"
-omarchy-shell shell call "$ID" close '{}' >/dev/null 2>&1
+# Processes are sampled only while open; allow one 2s poll to land.
+sleep 4
+[ "$(state | field processCount)" != "0" ] && [ "$(state | field processCount)" != "null" ] \
+  && ok "process list populates while open ($(state | field processCount) rows)" || fail "process list populates while open"
+qshell close >/dev/null 2>&1
 sleep 1
 [ "$(state | field opened)" = "False" ] && ok "close hides panel" || fail "close hides panel"
 
 # toggle flips both ways, ends closed.
-omarchy-shell shell call "$ID" toggle '{}' >/dev/null 2>&1
+qshell toggle >/dev/null 2>&1
 sleep 1
 [ "$(state | field opened)" = "True" ] && ok "toggle opens" || fail "toggle opens"
-omarchy-shell shell call "$ID" toggle '{}' >/dev/null 2>&1
+qshell toggle >/dev/null 2>&1
 sleep 1
 [ "$(state | field opened)" = "False" ] && ok "toggle closes" || fail "toggle closes"
 

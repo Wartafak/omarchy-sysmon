@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "wartafak.sysmon",
   "name": "SysMon",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "wartafak",
   "license": "MIT",
-  "description": "CPU/GPU/memory usage and temperature with 10-minute averages and history graphs",
+  "description": "Live CPU/GPU/memory stats with history graphs, plus a sortable process table with kill actions",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "SysMon",
-    "description": "CPU, GPU and memory usage + temperature with history graphs",
+    "description": "Live CPU, GPU and memory stats with history graphs and process table",
     "category": "System",
     "allowMultiple": false,
     "defaultSection": "right"
