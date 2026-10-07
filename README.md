@@ -46,4 +46,38 @@ omarchy plugin remove wartafak.sysmon
   each poll, so labels follow whatever hardware the host has.
 - `BarWidget.qml` owns the poller and the 300-sample (10-minute) histories.
 - `Panel.qml` renders current values, 10-minute averages, and Canvas line graphs.
-- `Model.js` holds pure-JS helpers (tested with `node -e` against the module).
+- `Model.js` holds pure-JS helpers, shared by QML and the unit tests.
+- `debugState` IPC accessor for scripting and diagnosis.
+
+## Files
+
+- `manifest.json` — id `wartafak.sysmon`, kind `bar-widget`
+- `BarWidget.qml` — compact readout (BarWidget base) + 2s poller + histories
+- `Panel.qml` — popup with summary rings, current values, averages, graphs
+- `stats.sh` — 2s collector, prints one JSON line per poll
+- `Model.js` — pure helpers (parsing, history, formatting, graph mapping),
+  shared by QML and the unit tests
+- `tests/model.test.js` — unit tests, no dependencies
+- `tests/integration.sh` — stats.sh schema test + live end-to-end via shell IPC
+
+## Testing
+
+All display decisions live in `Model.js` as dependency-free functions,
+imported by `BarWidget.qml`/`Panel.qml` (`import "Model.js" as Model`) and
+by Node directly — so the same code that runs in the shell runs under
+test.
+
+```bash
+omarchy plugin validate ~/.config/omarchy/plugins/wartafak.sysmon
+node --test tests/   # 38 unit tests, no runner to install
+./tests/integration.sh  # static stats.sh checks always; live shell checks
+                        # need omarchy-shell running (restart it after QML
+                        # edits: hot-reload does not re-execute plugins)
+```
+
+The integration test validates the `stats.sh` JSON schema and value ranges
+(cpu/gpu/mem 0–100 or null, sane temps, `mem_used <= mem_total`, known
+`gpu_vendor`), then — when the live shell is available — drives the real
+widget through `omarchy-shell shell call` and the `debugState` accessor,
+asserting bounded histories, a callable `refresh`, and an open/close/toggle
+round-trip that ends with the panel closed.

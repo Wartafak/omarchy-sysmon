@@ -76,6 +76,8 @@ function fmtTemp(v) {
 }
 
 function fmtMemDetail(usedKb, totalKb) {
+  if (usedKb === null || usedKb === undefined || usedKb === ""
+    || totalKb === null || totalKb === undefined || totalKb === "") return "";
   var u = Number(usedKb), t = Number(totalKb);
   if (!isFinite(u) || !isFinite(t) || t <= 0) return "";
   return (u / 1048576).toFixed(1) + " / " + (t / 1048576).toFixed(1) + " GB";

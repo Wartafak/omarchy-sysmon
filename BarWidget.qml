@@ -136,6 +136,30 @@ BarWidget {
   // ---- popup panel routing (clock pattern) ----
   readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
 
+  // Read-only diagnostics for tests/scripting. Reached via
+  // `omarchy-shell shell call wartafak.sysmon debugState '{}'`.
+  function debugState() {
+    return JSON.stringify({
+      opened: root.opened,
+      cpu: root.cpu,
+      cpuTemp: root.cpuTemp,
+      gpu: root.gpu,
+      gpuTemp: root.gpuTemp,
+      gpuVendor: root.gpuVendor,
+      gpuShort: root.gpuShort,
+      cpuModel: root.cpuModel,
+      cpuThreads: root.cpuThreads,
+      cpuMaxGhz: root.cpuMaxGhz,
+      mem: root.mem,
+      memUsedKb: root.memUsedKb,
+      memTotalKb: root.memTotalKb,
+      hasGpu: root.hasGpu,
+      sampleCount: root.sampleCount,
+      cpuHistLen: root.cpuHist ? root.cpuHist.length : 0,
+      memHistLen: root.memHist ? root.memHist.length : 0
+    })
+  }
+
   function open() { if (panelLoader.item) panelLoader.item.open() }
   function close() { if (panelLoader.item) panelLoader.item.close() }
   function togglePanel() { if (panelLoader.item) panelLoader.item.toggle() }
@@ -196,6 +220,7 @@ BarWidget {
     function show(): void { root.open() }
     function hide(): void { root.close() }
     function toggle(): void { root.togglePanel() }
+    function debugState(): string { return root.debugState() }
   }
 
   WidgetButton {
