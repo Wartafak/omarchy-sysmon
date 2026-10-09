@@ -5,7 +5,7 @@
   "version": "1.1.0",
   "author": "wartafak",
   "license": "MIT",
-  "description": "Live CPU/GPU/memory stats with history graphs, plus a sortable process table with kill actions",
+  "description": "Top-bar CPU/GPU/memory usage with temps (GPU hides when absent), hover tooltip with 10-minute averages, click-to-toggle popup (right-click refresh) with summary rings, history graphs and theme-aware colors, plus a sortable top-25 process table with live count, absolute+percent memory, click-to-copy PIDs and per-row TERM/KILL",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "SysMon",
-    "description": "Live CPU, GPU and memory stats with history graphs and process table",
+    "description": "Top-bar CPU/GPU/memory with temps, popup with rings, averages, history graphs and sortable process table with TERM/KILL",
     "category": "System",
     "allowMultiple": false,
     "defaultSection": "right"
